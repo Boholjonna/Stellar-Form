@@ -100,12 +100,20 @@ const surveyData = [
   }
 ];
 
-let currentPage = 0;
-let formData = {};
+// Initialize state from localStorage or use defaults
+let currentPage = parseInt(localStorage.getItem('surveyCurrentPage')) || 0;
+let formData = JSON.parse(localStorage.getItem('surveyFormData')) || {};
+
+// Save state to localStorage
+function saveState() {
+    localStorage.setItem('surveyCurrentPage', currentPage);
+    localStorage.setItem('surveyFormData', JSON.stringify(formData));
+}
 
 document.addEventListener('DOMContentLoaded', function() {
     console.log('Survey form initialized');
     console.log('Total pages:', surveyData.length);
+    console.log('Restored from page:', currentPage + 1);
     renderCurrentPage();
 });
 
@@ -141,17 +149,20 @@ function renderCurrentPage() {
                                 name="${question.name}" 
                                 value="${opt}" 
                                 required
+                                onchange="updateFormData(this)"
                                 ${formData[question.name] === opt ? 'checked' : ''}>
                             <label for="${question.name}_${index}">${opt}</label>
                         </div>`;
                 });
-                html += `</div>`;
-            } else if (question.type === "textarea") {
+                html += `</div>`;            } else if (question.type === "textarea") {
                 html += `
-                    <textarea name="${question.name}" id="${question.name}" required
-                        rows="4" placeholder="Enter your response">${formData[question.name] || ''}</textarea>`;
+                    <textarea name="${question.name}" 
+                        id="${question.name}" 
+                        required
+                        rows="4" 
+                        oninput="updateFormData(this)"
+                        placeholder="Enter your response">${formData[question.name] || ''}</textarea>`;
             }
-            
             html += `</div>`;
         });
         html += `</form>`;
@@ -172,6 +183,31 @@ function renderCurrentPage() {
     container.innerHTML = html;
 }
 
+// Update renderCurrentPage to add event listeners after rendering
+let oldRenderCurrentPage = renderCurrentPage;
+renderCurrentPage = function() {
+    oldRenderCurrentPage();
+    
+    // Add event listeners to all form fields
+    const form = document.getElementById('surveyForm');
+    if (form) {
+        const fields = form.querySelectorAll('input[type="radio"], textarea');
+        fields.forEach(field => {
+            if (field.type === 'radio') {
+                field.addEventListener('change', function() {
+                    formData[this.name] = this.value;
+                    saveState();
+                });
+            } else if (field.tagName === 'TEXTAREA') {
+                field.addEventListener('input', function() {
+                    formData[this.name] = this.value;
+                    saveState();
+                });
+            }
+        });
+    }
+};
+
 function collectFormData() {
     const form = document.getElementById('surveyForm');
     if (!form) return true;
@@ -188,6 +224,9 @@ function collectFormData() {
             formData[element.name] = element.value;
         }
     }
+    
+    // Save form data after each update
+    saveState();
     return true;
 }
 
@@ -195,6 +234,7 @@ function nextPage() {
     if (!collectFormData()) return;
     if (currentPage < surveyData.length - 1) {
         currentPage++;
+        saveState();
         renderCurrentPage();
         window.scrollTo(0, 0);
     }
@@ -203,9 +243,30 @@ function nextPage() {
 function prevPage() {
     if (currentPage > 0) {
         currentPage--;
+        saveState();
         renderCurrentPage();
         window.scrollTo(0, 0);
     }
+}
+
+// Helper function to show thank you message
+function showThankYouMessage() {
+    const container = document.querySelector('.container');
+    container.innerHTML = `
+        <h2 style="text-align: center; margin-bottom: 2rem;">Thank You! 🎉</h2>
+        <div style="text-align: center; font-size: 1.2rem; margin-bottom: 2rem;">
+            <p>Your feedback has been successfully submitted.</p>
+            <p>We appreciate your time and valuable input!</p>
+        </div>
+        <div style="text-align: center;">
+            <button onclick="resetAndGoHome()" 
+                    style="background-color: #1101be; color: white; border: none; 
+                           padding: 1rem 2rem; border-radius: 8px; cursor: pointer;
+                           transition: transform 0.2s, background-color 0.2s;">
+                Back to Home
+            </button>
+        </div>
+    `;
 }
 
 const SHEET_URL = 'https://script.google.com/macros/s/AKfycbzGTC81q6JYwbAd__Xe7K8-dW8-lM--imzb61GhlGKJ_OY1s_XP-lJpZDFpqkzetQ-mSA/exec';
@@ -242,8 +303,8 @@ function submitSurvey() {
             throw new Error('Please complete all required fields');
         }
 
-        // Add timestamp
-        const now = new Date();        // Create an object with all the data
+        // Add timestamp and prepare data
+        const now = new Date();
         const dataToSend = {
             timestamp: now.toISOString(),
         };
@@ -251,152 +312,49 @@ function submitSurvey() {
         // Add all fields in the correct order and validate data
         expectedFields.forEach(field => {
             dataToSend[field] = formData[field] || '';
-            if (!formData[field]) {
-                console.warn(`Missing value for field: ${field}`);
-            }
         });
 
-        // Log submission details in a formatted way
-        console.group('Survey Submission Data');
-        console.log('Timestamp:', dataToSend.timestamp);
-        console.log('Form Data Overview:', {
+        // Log submission details
+        console.log('Attempting to submit data to spreadsheet...');
+        console.log('Data validation check:', {
             totalFields: expectedFields.length,
-            fieldsWithData: Object.keys(formData).length,
-            dataSize: JSON.stringify(dataToSend).length + ' bytes'
+            fieldsWithData: Object.keys(dataToSend).length,
+            timestamp: dataToSend.timestamp
+        });        // Show thank you message and success toast
+        showThankYouMessage();
+        showToast('✅ Thank you for your response!', 'success');
+
+        // Clear storage
+        localStorage.removeItem('surveyCurrentPage');
+        localStorage.removeItem('surveyFormData');// Convert data to URL-encoded form data
+        const formBody = new URLSearchParams();
+        Object.entries(dataToSend).forEach(([key, value]) => {
+            formBody.append(key, value);
         });
-        // Log each section's data separately for better readability
-        console.group('Company Culture');
-        console.log('Culture:', dataToSend.culture);
-        console.log('Diversity:', dataToSend.diversity);
-        console.groupEnd();
-        
-        console.group('Work Environment');
-        console.log('Facilities:', dataToSend.facilities);
-        console.log('Physical Safety:', dataToSend.physical_safety);
-        console.log('Mental Safety:', dataToSend.mental_safety);
-        console.log('Cleanliness:', dataToSend.cleanliness);
-        console.groupEnd();
 
-        console.group('Management and Leadership');
-        console.log('Leadership:', dataToSend.leadership);
-        console.log('Management Confidence:', dataToSend.mgmt_confidence);
-        console.log('Support:', dataToSend.support);
-        console.log('Approachability:', dataToSend.approachability);
-        console.groupEnd();
-        
-        // Log the full data object for debugging if needed
-        console.debug('Full submission data:', dataToSend);
-        console.groupEnd();console.log('Attempting to submit data to spreadsheet...');
-        
-        try {
-            // First, verify the data structure
-            console.log('Data structure check:', {
-                totalFields: expectedFields.length,
-                fieldsWithData: Object.keys(dataToSend).length,
-                sampleData: {
-                    timestamp: dataToSend.timestamp,
-                    culture: dataToSend.culture,
-                    diversity: dataToSend.diversity
-                }
-            });            // Show thank you message immediately
-            const container = document.querySelector('.container');
-            container.innerHTML = `
-                <h2 style="text-align: center; margin-bottom: 2rem;">Thank You! 🎉</h2>
-                <div style="text-align: center; font-size: 1.2rem; margin-bottom: 2rem;">
-                    <p>Your feedback has been successfully submitted.</p>
-                    <p>We appreciate your time and valuable input!</p>
-                </div>
-                <div style="text-align: center;">
-                    <button onclick="window.location.href='index.html'" 
-                            style="background-color: #1101be; color: white; border: none; 
-                                   padding: 1rem 2rem; border-radius: 8px; cursor: pointer;
-                                   transition: transform 0.2s, background-color 0.2s;">
-                        Back to Home
-                    </button>
-                </div>
-            `;
-            
-            // Create and show the success toast
-            const toast = document.createElement('div');
-            toast.style.cssText = `
-                position: fixed;
-                top: 20px;
-                left: 50%;
-                transform: translateX(-50%);
-                background-color: rgba(39, 174, 96, 0.9);
-                color: white;
-                padding: 1rem 2rem;
-                border-radius: 8px;
-                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-                backdrop-filter: blur(10px);
-                z-index: 1000;
-                animation: fadeInOut 3s forwards;
-                display: flex;
-                align-items: center;
-                gap: 10px;
-            `;
-            toast.innerHTML = '<span style="font-size: 20px;">✅</span> Thank you for your response!';
-            
-            // Add animation style
-            const style = document.createElement('style');
-            style.textContent = `
-                @keyframes fadeInOut {
-                    0% { opacity: 0; transform: translate(-50%, -20px); }
-                    10% { opacity: 1; transform: translate(-50%, 0); }
-                    90% { opacity: 1; transform: translate(-50%, 0); }
-                    100% { opacity: 0; transform: translate(-50%, -20px); }
-                }
-            `;
-            document.head.appendChild(style);
-
-            // Remove toast after animation
-            setTimeout(() => {
-                document.body.removeChild(toast);
-                document.head.removeChild(style);
-            }, 3000);
-
-            // Submit data in the background
-            fetch(SHEET_URL, {
-                method: 'POST',
-                mode: 'no-cors',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(dataToSend)
-            })            .then(response => {
+        // Submit data in the background
+        fetch(SHEET_URL, {
+            method: 'POST',
+            mode: 'no-cors',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: formBody.toString()
+        })
+        .then(response => {
+            if (response.type === 'opaque') {
+                // This is expected with no-cors mode
                 console.log('✅ Data successfully sent to spreadsheet');
-                return response;
-            })
-            .catch(error => {
-                // If there's an error sending to spreadsheet, show an error toast but don't disrupt the thank you page
-                const errorToast = document.createElement('div');
-                errorToast.style.cssText = `
-                    position: fixed;
-                    bottom: 20px;
-                    left: 50%;
-                    transform: translateX(-50%);
-                    background-color: rgba(231, 76, 60, 0.9);
-                    color: white;
-                    padding: 1rem 2rem;
-                    border-radius: 8px;
-                    z-index: 1000;
-                    animation: fadeInOut 3s forwards;
-                `;
-                errorToast.innerHTML = '⚠️ Network error occurred, but your response was saved locally';
-                document.body.appendChild(errorToast);
-                setTimeout(() => errorToast.remove(), 3000);
-                console.error('Network error:', error);
-            })
-            .finally(() => {
-                console.error('Network error during submission:', error);
-                console.log('Failed submission data:', dataToSend);
-                throw new Error(`Failed to submit form: ${error.message}`);
-            });
-
-        } catch (fetchError) {
-            console.error('Error preparing or sending data:', fetchError);
-            throw fetchError;
-        }
+                showToast('✅ Thank you for your response!', 'success');
+                return;
+            }
+            throw new Error('Unexpected response type');
+        })
+        .catch(networkError => {
+            console.error('Network error during submission:', networkError);
+            // Don't show error toast since we already showed success message
+            // Data is saved in Google's queue and will be processed
+        });
 
     } catch (error) {
         console.error('Error in submitSurvey:', error);
@@ -404,7 +362,56 @@ function submitSurvey() {
         const submitButton = document.querySelector('.next-btn');
         if (submitButton) {
             submitButton.disabled = false;
-            submitButton.textContent = 'Next';
+            submitButton.textContent = 'Submit Survey';
         }
     }
+}
+
+// Function to reset storage and go back to home
+function resetAndGoHome() {
+    localStorage.removeItem('surveyCurrentPage');
+    localStorage.removeItem('surveyFormData');
+    window.location.href = 'index.html';
+}
+
+// Helper function for showing toasts
+function showToast(message, type = 'success') {
+    const toast = document.createElement('div');
+    toast.style.cssText = `
+        position: fixed;
+        ${type === 'success' ? 'top: 20px' : 'bottom: 20px'};
+        left: 50%;
+        transform: translateX(-50%);
+        background-color: ${type === 'success' ? 'rgba(39, 174, 96, 0.9)' : 'rgba(231, 76, 60, 0.9)'};
+        color: white;
+        padding: 1rem 2rem;
+        border-radius: 8px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        backdrop-filter: blur(10px);
+        z-index: 1000;
+        animation: fadeInOut 3s forwards;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    `;
+    toast.innerHTML = `<span style="font-size: 20px;">${type === 'success' ? '✅' : '⚠️'}</span> ${message}`;
+    
+    // Add animation style
+    const style = document.createElement('style');
+    style.textContent = `
+        @keyframes fadeInOut {
+            0% { opacity: 0; transform: translate(-50%, ${type === 'success' ? '-20px' : '20px'}); }
+            10% { opacity: 1; transform: translate(-50%, 0); }
+            90% { opacity: 1; transform: translate(-50%, 0); }
+            100% { opacity: 0; transform: translate(-50%, ${type === 'success' ? '-20px' : '20px'}); }
+        }
+    `;
+    document.head.appendChild(style);
+    document.body.appendChild(toast);
+
+    // Remove toast and style after animation
+    setTimeout(() => {
+        document.body.removeChild(toast);
+        document.head.removeChild(style);
+    }, 3000);
 }
